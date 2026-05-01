@@ -134,6 +134,16 @@ public class AstronomicalCalendar implements Cloneable {
     }
 
 	/**
+	 * Backward-compatible alias for elevation-adjusted sunrise.
+	 *
+	 * @return the <code>Instant</code> representing the exact elevation-adjusted sunrise time.
+	 * @see #getSunrise()
+	 */
+	public Instant getSunriseWithElevation() {
+		return getSunrise();
+	}
+
+	/**
 	 * A method that returns the sunrise without {@link AstronomicalCalculator#getElevationAdjustment(double) elevation
 	 * adjustment}. Non-sunrise and sunset calculations such as dawn and dusk, depend on the amount of visible light,
 	 * something that is not affected by elevation. This method returns sunrise calculated at sea level. This forms the
@@ -213,6 +223,16 @@ public class AstronomicalCalendar implements Cloneable {
 		} else {
 			return getInstantFromTime(sunset, SolarEvent.SUNSET);
 		}
+	}
+
+	/**
+	 * Backward-compatible alias for elevation-adjusted sunset.
+	 *
+	 * @return the <code>Instant</code> representing the exact elevation-adjusted sunset time.
+	 * @see #getSunset()
+	 */
+	public Instant getSunsetWithElevation() {
+		return getSunset();
 	}
 
 	/**

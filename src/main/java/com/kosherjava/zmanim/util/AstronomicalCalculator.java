@@ -85,13 +85,13 @@ public abstract class AstronomicalCalculator implements Cloneable {
 
 	/**
 	 * Returns the default class for calculating sunrise and sunset. This is currently the more accurate
-	 * {@link NOAACalculator}, but this may change in the future.
+	 * {@link SPACalculator}, but this may change in the future.
 	 * 
 	 * @return AstronomicalCalculator the default class for calculating sunrise and sunset. In the current
-	 *         implementation the default calculator returned is the more accurate {@link NOAACalculator}.
+	 *         implementation the default calculator returned is the more accurate {@link SPACalculator}.
 	 */
 	public static AstronomicalCalculator getDefault() {
-		return new NOAACalculator();
+		return new SPACalculator();
 	}
 
 	/**
