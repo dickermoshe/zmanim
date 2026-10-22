@@ -79,6 +79,27 @@ public class SPACalculator extends AstronomicalCalculator {
 	/** Julian days per century. */
 	private static final double JULIAN_DAYS_PER_CENTURY = 36525.0;
 
+	/**
+	 * The largest difference, in degrees, between the Sun's zenith at a solved sunrise or sunset and the requested zenith for the
+	 * secant iteration's result to be accepted. Converged results end within about 1e-6&deg; (floating-point noise), and failed
+	 * iterations almost always end more than 1e-3&deg; away. 1e-4&deg; sits between the two and is below the SPA's stated
+	 * accuracy of &plusmn;0.0003&deg;.
+	 */
+	private static final double MAX_ZENITH_RESIDUAL = 1e-4;
+
+	/**
+	 * How far, in degrees, the closed-form estimate in {@link #solveRiseSet} may put the zenith out of the Sun's reach before
+	 * the event is rejected without a scan. The estimate uses the declination at noon, which moves up to about 0.2&deg; in
+	 * half a day, so a zenith just out of reach at noon can still be crossed near midnight.
+	 */
+	private static final double CLOSED_FORM_MARGIN = 0.5;
+
+	/** The step, in minutes, of the scan in {@link #scanRiseSet} that looks for a sign change in the zenith difference. */
+	private static final double SCAN_STEP_MINUTES = 5;
+
+	/** The width, in minutes, at which {@link #scanRiseSet} stops halving a bracket (one millisecond). */
+	private static final double SCAN_TOLERANCE_MINUTES = 1.0 / 60000.0;
+
 	/** Whether to apply the ΔT (TT−UT) correction. Defaults to {@code true}. */
 	private boolean applyDeltaT = true;
 
@@ -309,8 +330,19 @@ public class SPACalculator extends AstronomicalCalculator {
 		double eot = noon.eot;
 		double cosH0 = (cosDegrees(adjustedZenith) - sinDegrees(lat) * sinDegrees(declNoon))
 				/ (cosDegrees(lat) * cosDegrees(declNoon));
+		// Sunrise belongs between solar midnight and noon, sunset between noon and the next solar midnight.
+		double windowStart = (solarEvent == SolarEvent.SUNRISE) ? noonMin - 720 : noonMin;
+		double windowEnd = windowStart + 720;
 		if (cosH0 < -1.0 || cosH0 > 1.0) {
-			return Double.NaN; // sun never reaches this zenith (polar day / night)
+			// The Sun's smallest and largest zenith of the day, at the noon declination.
+			double noonZenith = Math.abs(lat - declNoon);
+			double midnightZenith = 180 - Math.abs(lat + declNoon);
+			if (adjustedZenith < noonZenith - CLOSED_FORM_MARGIN || adjustedZenith > midnightZenith + CLOSED_FORM_MARGIN) {
+				return Double.NaN; // sun never reaches this zenith (polar day / night)
+			}
+			// Only just out of reach at the noon declination; check the half day directly.
+			return scanRiseSet(jdDay, lat, geoLocation.getLongitude(), elevation, adjustedZenith, windowStart, windowEnd,
+					solarEvent);
 		}
 		double h0 = acosDegrees(cosH0); // degrees, positive
 		double signed = (solarEvent == SolarEvent.SUNRISE) ? h0 : -h0;
@@ -331,7 +363,56 @@ public class SPACalculator extends AstronomicalCalculator {
 			t1 = t2;
 			f1 = topocentricTrueZenith(jdDay + t1 / 1440.0, lat, geoLocation.getLongitude(), elevation) - adjustedZenith;
 		}
-		return t1;
+
+		if (Math.abs(f1) <= MAX_ZENITH_RESIDUAL && t1 >= windowStart && t1 <= windowEnd) {
+			return t1;
+		}
+		// Near the poles the iteration can fail to converge when the Sun barely misses the zenith, or converge on a crossing
+		// on another day. Search the half day directly, so a real crossing is still found and NaN is returned only when the
+		// Sun does not reach the zenith in it.
+		return scanRiseSet(jdDay, lat, geoLocation.getLongitude(), elevation, adjustedZenith, windowStart, windowEnd, solarEvent);
+	}
+
+	/**
+	 * The fallback for {@link #solveRiseSet} when the secant iteration fails. Samples the zenith difference every
+	 * {@link #SCAN_STEP_MINUTES} across the half day, takes the first sample pair where the Sun crosses the zenith in the
+	 * direction of the event (downward in zenith for sunrise, upward for sunset), and halves that bracket to one millisecond.
+	 * @param jdDay the Julian day for 0:00 UT of the date.
+	 * @param lat the observer latitude in degrees.
+	 * @param lon the observer longitude in degrees, positive east.
+	 * @param elevation the observer elevation in meters.
+	 * @param adjustedZenith the target zenith.
+	 * @param windowStart the start of the half day, in UTC minutes after 0:00.
+	 * @param windowEnd the end of the half day, in UTC minutes after 0:00.
+	 * @param solarEvent {@link SolarEvent#SUNRISE} or {@link SolarEvent#SUNSET}.
+	 * @return UTC minutes after 0:00, or {@link Double#NaN} if the Sun does not cross the zenith in the half day.
+	 */
+	private double scanRiseSet(double jdDay, double lat, double lon, double elevation, double adjustedZenith,
+			double windowStart, double windowEnd, SolarEvent solarEvent) {
+		// Positive before the event and negative after it, for both sunrise and sunset.
+		double sign = (solarEvent == SolarEvent.SUNRISE) ? 1 : -1;
+		double a = windowStart;
+		double fa = sign * (topocentricTrueZenith(jdDay + a / 1440.0, lat, lon, elevation) - adjustedZenith);
+		int steps = (int) Math.ceil((windowEnd - windowStart) / SCAN_STEP_MINUTES);
+		for (int i = 1; i <= steps; i++) {
+			double b = Math.min(windowStart + i * SCAN_STEP_MINUTES, windowEnd);
+			double fb = sign * (topocentricTrueZenith(jdDay + b / 1440.0, lat, lon, elevation) - adjustedZenith);
+			if (fa > 0 && fb <= 0) {
+				while (b - a > SCAN_TOLERANCE_MINUTES) {
+					double mid = (a + b) / 2;
+					double fm = sign * (topocentricTrueZenith(jdDay + mid / 1440.0, lat, lon, elevation) - adjustedZenith);
+					if (fm > 0) {
+						a = mid;
+					} else {
+						b = mid;
+					}
+				}
+				return b;
+			}
+			a = b;
+			fa = fb;
+		}
+		return Double.NaN;
 	}
 
 	/**

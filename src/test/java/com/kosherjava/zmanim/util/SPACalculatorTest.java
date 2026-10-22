@@ -21,6 +21,7 @@ import static org.junit.Assert.assertTrue;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 
@@ -114,6 +115,29 @@ public class SPACalculatorTest {
 			double actual = calculator().getUTCSunset(date((String) c[1]), geo((String) c[2]), ZENITH, true);
 			assertUtcHour((String) c[0], (double) c[3], actual);
 		}
+	}
+
+	/**
+	 * Near the South Pole in March the closed-form first guess says the Sun reaches 100.2&deg; zenith, but the topocentric Sun
+	 * only gets to about 100.04&deg;. The secant iteration does not converge, and the half-day scan confirms there is no event.
+	 */
+	@Test
+	public void unconvergedRiseSetIsNoEvent() {
+		GeoLocation location = new GeoLocation("Antarctica", -77.26876171057897, -92.86928302120835, 3965.3333110036533,
+				ZoneId.of("Etc/GMT+6"));
+		double actual = calculator().getUTCSunrise(date("2127-03-14"), location, 100.2, false);
+		assertTrue("Sun never reaches 100.2° zenith; expected NaN but got " + actual, Double.isNaN(actual));
+	}
+
+	/**
+	 * Near the North Pole the secant iteration converges on a 106&deg; crossing on the following day (17:55 UTC on October
+	 * 27). The Sun does not reach that zenith between solar midnight and noon on October 26, so there is no event.
+	 */
+	@Test
+	public void crossingOnAnotherDayIsNoEvent() {
+		GeoLocation location = new GeoLocation("Arctic", 86.4, 56, 0, ZoneId.of("UTC"));
+		double actual = calculator().getUTCSunrise(date("2014-10-26"), location, 106, false);
+		assertTrue("106° crossing is on another day; expected NaN but got " + actual, Double.isNaN(actual));
 	}
 
 	@Test
